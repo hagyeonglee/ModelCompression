@@ -2,6 +2,7 @@ import torch
 import tqdm
 from collections import OrderedDict
 from util import get_clamped_psnr
+import matplotlib.pyplot as plt
 
 
 class Trainer():
@@ -15,16 +16,18 @@ class Trainer():
             print_freq (int): Frequency with which to print losses.
         """
         self.representation = representation
-        self.optimizer = torch.optim.Adam(self.representation.parameters(), lr=lr)
+        self.optimizer = torch.optim.Adam(
+            self.representation.parameters(), lr=lr)
         self.print_freq = print_freq
         self.steps = 0  # Number of steps taken in training
         self.loss_func = torch.nn.MSELoss()
         self.best_vals = {'psnr': 0.0, 'loss': 1e8}
         self.logs = {'psnr': [], 'loss': []}
         # Store parameters of best model (in terms of highest PSNR achieved)
-        self.best_model = OrderedDict((k, v.detach().clone()) for k, v in self.representation.state_dict().items())
+        self.best_model = OrderedDict((k, v.detach().clone())
+                                      for k, v in self.representation.state_dict().items())
 
-    def train(self, coordinates, features, num_iters):
+    def train(self, coordinates, features, num_iters, show=False):
         """Fit neural net to image.
 
         Args:
@@ -33,6 +36,8 @@ class Trainer():
             features (torch.Tensor): Tensor of features. Shape (num_points, feature_dim).
             num_iters (int): Number of iterations to train for.
         """
+        iter_li = []
+        psnr_li = []
         with tqdm.trange(num_iters, ncols=100) as t:
             for i in t:
                 # Update model
@@ -49,7 +54,10 @@ class Trainer():
                 log_dict = {'loss': loss.item(),
                             'psnr': psnr,
                             'best_psnr': self.best_vals['psnr']}
+
                 t.set_postfix(**log_dict)
+                iter_li.append(i)
+                psnr_li.append(psnr)
                 for key in ['loss', 'psnr']:
                     self.logs[key].append(log_dict[key])
 
@@ -63,3 +71,12 @@ class Trainer():
                     if i > int(num_iters / 2.):
                         for k, v in self.representation.state_dict().items():
                             self.best_model[k].copy_(v)
+        if show:
+            plt.plot(iter_li, psnr_li)
+            plt.xlabel('Iterations')
+            plt.ylabel('PSNR [dB]')
+            plt.savefig("iter-psnr", format='png',
+                        dpi=400, bbox_inches='tight')
+            # plt.show()
+            # print(iter_li)
+            # print(psnr_li)

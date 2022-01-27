@@ -59,7 +59,8 @@ def bpp(image, model):
         image (torch.Tensor): Image to be fitted by model.
         model (torch.nn.Module): Model used to fit image.
     """
-    num_pixels = np.prod(image.shape) / 3  # Dividing by 3 because of RGB channels
+    num_pixels = np.prod(image.shape) / \
+        3  # Dividing by 3 because of RGB channels
     return model_size_in_bits(model=model) / num_pixels
 
 

@@ -10,26 +10,40 @@ from siren import Siren
 from torchvision import transforms
 from torchvision.utils import save_image
 from training import Trainer
+import torch.quantization
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-ld", "--logdir", help="Path to save logs", default=f"/tmp/{getpass.getuser()}")
-parser.add_argument("-ni", "--num_iters", help="Number of iterations to train for", type=int, default=50000)
-parser.add_argument("-lr", "--learning_rate", help="Learning rate", type=float, default=2e-4)
-parser.add_argument("-se", "--seed", help="Random seed", type=int, default=random.randint(1, int(1e6)))
-parser.add_argument("-fd", "--full_dataset", help="Whether to use full dataset", action='store_true')
-parser.add_argument("-iid", "--image_id", help="Image ID to train on, if not the full dataset", type=int, default=15)
-parser.add_argument("-lss", "--layer_size", help="Layer sizes as list of ints", type=int, default=28)
-parser.add_argument("-nl", "--num_layers", help="Number of layers", type=int, default=10)
-parser.add_argument("-w0", "--w0", help="w0 parameter for SIREN model.", type=float, default=30.0)
-parser.add_argument("-w0i", "--w0_initial", help="w0 parameter for first layer of SIREN model.", type=float, default=30.0)
+parser.add_argument("-ld", "--logdir", help="Path to save logs",
+                    default=f"/tmp/{getpass.getuser()}")
+parser.add_argument("-ni", "--num_iters",
+                    help="Number of iterations to train for", type=int, default=50000)
+parser.add_argument("-lr", "--learning_rate",
+                    help="Learning rate", type=float, default=2e-4)
+parser.add_argument("-se", "--seed", help="Random seed",
+                    type=int, default=random.randint(1, int(1e6)))
+parser.add_argument("-fd", "--full_dataset",
+                    help="Whether to use full dataset", action='store_true')
+parser.add_argument("-iid", "--image_id",
+                    help="Image ID to train on, if not the full dataset", type=int, default=15)
+parser.add_argument("-celebA", "--celebA",
+                    help="Choose celebA dataset", action='store_true')
+parser.add_argument("-lss", "--layer_size",
+                    help="Layer sizes as list of ints", type=int, default=28)
+parser.add_argument("-nl", "--num_layers",
+                    help="Number of layers", type=int, default=10)
+parser.add_argument(
+    "-w0", "--w0", help="w0 parameter for SIREN model.", type=float, default=30.0)
+parser.add_argument("-w0i", "--w0_initial",
+                    help="w0 parameter for first layer of SIREN model.", type=float, default=30.0)
 
 args = parser.parse_args()
 
 # Set up torch and cuda
 dtype = torch.float32
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-torch.set_default_tensor_type('torch.cuda.FloatTensor' if torch.cuda.is_available() else 'torch.FloatTensor')
+torch.set_default_tensor_type(
+    'torch.cuda.FloatTensor' if torch.cuda.is_available() else 'torch.FloatTensor')
 
 # Set random seeds
 torch.manual_seed(args.seed)
@@ -52,7 +66,11 @@ for i in range(min_id, max_id + 1):
     print(f'Image {i}')
 
     # Load image
-    img = imageio.imread(f"kodak-dataset/kodim{str(i).zfill(2)}.png")
+    if args.celebA:
+        img = imageio.imread(
+            f"img_align_celeba/img_align_celeba/{str(i).zfill(6)}.jpg")
+    else:
+        img = imageio.imread(f"kodak-dataset/kodim{str(i).zfill(2)}.png")
     img = transforms.ToTensor()(img).float().to(device, dtype)
 
     # Setup model
@@ -69,7 +87,8 @@ for i in range(min_id, max_id + 1):
     # Set up training
     trainer = Trainer(func_rep, lr=args.learning_rate)
     coordinates, features = util.to_coordinates_and_features(img)
-    coordinates, features = coordinates.to(device, dtype), features.to(device, dtype)
+    coordinates, features = coordinates.to(
+        device, dtype), features.to(device, dtype)
 
     # Calculate model size. Divide by 8000 to go from bits to kB
     model_size = util.model_size_in_bits(func_rep) / 8000.
@@ -78,7 +97,7 @@ for i in range(min_id, max_id + 1):
     print(f'Full precision bpp: {fp_bpp:.2f}')
 
     # Train model in full precision
-    trainer.train(coordinates, features, num_iters=args.num_iters)
+    trainer.train(coordinates, features, num_iters=args.num_iters, show=True)
     print(f'Best training psnr: {trainer.best_vals["psnr"]:.2f}')
 
     # Log full precision results
@@ -93,8 +112,10 @@ for i in range(min_id, max_id + 1):
 
     # Save full precision image reconstruction
     with torch.no_grad():
-        img_recon = func_rep(coordinates).reshape(img.shape[1], img.shape[2], 3).permute(2, 0, 1)
-        save_image(torch.clamp(img_recon, 0, 1).to('cpu'), args.logdir + f'/fp_reconstruction_{i}.png')
+        img_recon = func_rep(coordinates).reshape(
+            img.shape[1], img.shape[2], 3).permute(2, 0, 1)
+        save_image(torch.clamp(img_recon, 0, 1).to('cpu'),
+                   args.logdir + f'/fp_reconstruction_{i}.png')
 
     # Convert model and coordinates to half precision. Note that half precision
     # torch.sin is only implemented on GPU, so must use cuda
@@ -109,11 +130,14 @@ for i in range(min_id, max_id + 1):
 
         # Compute image reconstruction and PSNR
         with torch.no_grad():
-            img_recon = func_rep(coordinates).reshape(img.shape[1], img.shape[2], 3).permute(2, 0, 1).float()
+            img_recon = func_rep(coordinates).reshape(
+                img.shape[1], img.shape[2], 3).permute(2, 0, 1).float()
             hp_psnr = util.get_clamped_psnr(img_recon, img)
-            save_image(torch.clamp(img_recon, 0, 1).to('cpu'), args.logdir + f'/hp_reconstruction_{i}.png')
+            save_image(torch.clamp(img_recon, 0, 1).to('cpu'),
+                       args.logdir + f'/hp_reconstruction_{i}.png')
             print(f'Half precision psnr: {hp_psnr:.2f}')
             results['hp_psnr'].append(hp_psnr)
+
     else:
         results['hp_bpp'].append(fp_bpp)
         results['hp_psnr'].append(0.0)
@@ -135,5 +159,9 @@ with open(args.logdir + f'/results_mean.json', 'w') as f:
     json.dump(results_mean, f)
 
 print('Aggregate results:')
-print(f'Full precision, bpp: {results_mean["fp_bpp"]:.2f}, psnr: {results_mean["fp_psnr"]:.2f}')
-print(f'Half precision, bpp: {results_mean["hp_bpp"]:.2f}, psnr: {results_mean["hp_psnr"]:.2f}')
+print(
+    f'Full precision, bpp: {results_mean["fp_bpp"]:.2f}, psnr: {results_mean["fp_psnr"]:.2f}')
+print(
+    f'Half precision, bpp: {results_mean["hp_bpp"]:.2f}, psnr: {results_mean["hp_psnr"]:.2f}')
+print(
+    f'Quarter precision, bpp: {results_mean["qt_bpp"]:.2f}, psnr: {results_mean["qt_psnr"]:.2f}')
